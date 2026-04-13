@@ -1,0 +1,30 @@
+{
+  "name": "openai-compatible-codebuddy",
+  "version": "1.0.0",
+  "description": "OpenAI compatible API server powered by CodeBuddy Agent SDK",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "tsx src/tests/cache.test.ts",
+    "test:integration": "tsx src/tests/integration.test.ts"
+  },
+  "keywords": ["openai", "compatible", "codebuddy", "agent-sdk", "api-server"],
+  "license": "MIT",
+  "dependencies": {
+    "@tencent-ai/agent-sdk": "^0.1.24",
+    "hono": "^4.4.0",
+    "@hono/node-server": "^1.11.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.19",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.1"
+  },
+  "engines": {
+    "node": ">=18.20.0"
+  }
+}
