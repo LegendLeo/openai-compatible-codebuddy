@@ -11,6 +11,8 @@ export interface AppConfig {
     maxSize: number;
   };
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  /** Whether debug mode is active (LOG_LEVEL=debug or NODE_ENV=development). */
+  debug: boolean;
   codebuddy: {
     apiKey?: string;
     environment?: string;
@@ -38,6 +40,9 @@ function getEnvBool(key: string, fallback: boolean): boolean {
   return val === 'true' || val === '1';
 }
 
+const _logLevel = (getEnv('LOG_LEVEL', 'info') as AppConfig['logLevel']);
+const _nodeEnv = getEnv('NODE_ENV', 'production');
+
 export const config: AppConfig = {
   port: getEnvInt('PORT', 3000),
   host: getEnvRequired('HOST', '0.0.0.0'),
@@ -48,7 +53,8 @@ export const config: AppConfig = {
     ttlMs: getEnvInt('CACHE_TTL_MS', 300_000),
     maxSize: getEnvInt('CACHE_MAX_SIZE', 100),
   },
-  logLevel: (getEnv('LOG_LEVEL', 'info') as AppConfig['logLevel']),
+  logLevel: _logLevel,
+  debug: _logLevel === 'debug' || _nodeEnv === 'development',
   codebuddy: {
     apiKey: getEnv('CODEBUDDY_API_KEY'),
     environment: getEnv('CODEBUDDY_INTERNET_ENVIRONMENT'),

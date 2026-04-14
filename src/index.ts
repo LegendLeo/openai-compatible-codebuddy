@@ -45,6 +45,7 @@ console.log(`
   → Listening on http://${config.host}:${config.port}
   → Default model: ${config.defaultModel}
   → Cache: ${config.cache.enabled ? `enabled (TTL=${config.cache.ttlMs}ms, max=${config.cache.maxSize})` : 'disabled'}
+  → Log level: ${config.logLevel}${config.debug ? ' (🐛 debug mode ON — verbose request/response logging)' : ''}
 
   Endpoints:
     POST /v1/chat/completions
