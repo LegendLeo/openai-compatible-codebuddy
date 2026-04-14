@@ -1,7 +1,8 @@
 import { query as sdkQuery } from '@tencent-ai/agent-sdk';
-import type { Message, Options } from '@tencent-ai/agent-sdk';
+import type { Message, Options, UserMessage } from '@tencent-ai/agent-sdk';
 import { config } from '../config.js';
 import { convertMessages, extractTextFromContentBlocks } from './message-converter.js';
+import type { AnthropicContentBlock } from './message-converter.js';
 import {
   formatChatCompletion,
   formatChatCompletionChunk,
@@ -23,18 +24,23 @@ function buildEnv(): Record<string, string | undefined> {
   return env;
 }
 
+// Default system prompt used when the caller doesn't supply one.
+// This overrides the SDK's built-in CodeBuddy Code prompt so the model
+// behaves as a plain assistant instead of a coding-specific agent.
+const DEFAULT_SYSTEM_PROMPT =
+  'You are a helpful assistant. Respond to the user\'s message directly.';
+
 function buildOptions(model: string, systemPrompt?: string): Options {
-  const opts: Options = {
+  return {
     model,
     fallbackModel: config.fallbackModel,
     permissionMode: 'bypassPermissions',
     maxTurns: 1,
     env: buildEnv(),
+    // Always set systemPrompt to override the SDK's built-in CodeBuddy prompt.
+    // When the caller provides one, use it; otherwise fall back to a neutral prompt.
+    systemPrompt: systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
   };
-  if (systemPrompt) {
-    opts.systemPrompt = systemPrompt;
-  }
-  return opts;
 }
 
 export interface ChatCompletionParams {
@@ -44,17 +50,54 @@ export interface ChatCompletionParams {
 }
 
 /**
+ * Build the prompt parameter for `sdkQuery`.
+ * When the message contains images, we construct an `AsyncIterable<UserMessage>`
+ * so the SDK forwards Anthropic-style content blocks (including image blocks)
+ * directly to the CLI, enabling native multimodal support.
+ */
+function buildPrompt(
+  prompt: string,
+  contentBlocks?: AnthropicContentBlock[],
+): string | AsyncIterable<UserMessage> {
+  if (!contentBlocks || contentBlocks.length === 0) {
+    return prompt;
+  }
+
+  // Build a single UserMessage with Anthropic content blocks.
+  // The SDK's transport.sendUserMessage() will JSON.stringify it
+  // and write to the CLI's stdin – the CLI then forwards these
+  // blocks (including image blocks) to the model API.
+  const userMessage: UserMessage = {
+    type: 'user',
+    session_id: '',
+    message: {
+      role: 'user',
+      // Cast: SDK types don't include image blocks, but the CLI accepts them
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      content: contentBlocks as any,
+    },
+    parent_tool_use_id: null,
+  };
+
+  // Return as an async iterable yielding a single message
+  async function* singleMessage(): AsyncIterable<UserMessage> {
+    yield userMessage;
+  }
+  return singleMessage();
+}
+
+/**
  * Non-streaming chat completion.
  * Collects all assistant text and returns a complete response.
  */
 export async function chatCompletion(
   params: ChatCompletionParams
 ): Promise<ChatCompletionResponse> {
-  const { systemPrompt, prompt } = convertMessages(params.messages);
+  const { systemPrompt, prompt, contentBlocks } = await convertMessages(params.messages);
   const model = params.model || config.defaultModel;
   const options = buildOptions(model, systemPrompt);
 
-  const q = sdkQuery({ prompt, options });
+  const q = sdkQuery({ prompt: buildPrompt(prompt, contentBlocks), options });
   let fullText = '';
   let lastUsage = { input_tokens: 0, output_tokens: 0 };
   let actualModel = model;
@@ -84,19 +127,19 @@ export async function chatCompletion(
 export function chatCompletionStream(
   params: ChatCompletionParams
 ): ReadableStream<Uint8Array> {
-  const { systemPrompt, prompt } = convertMessages(params.messages);
-  const model = params.model || config.defaultModel;
-  const options: Options = {
-    ...buildOptions(model, systemPrompt),
-    includePartialMessages: true,
-  };
-
   const encoder = new TextEncoder();
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const q = sdkQuery({ prompt, options });
+        const { systemPrompt, prompt, contentBlocks } = await convertMessages(params.messages);
+        const model = params.model || config.defaultModel;
+        const options: Options = {
+          ...buildOptions(model, systemPrompt),
+          includePartialMessages: true,
+        };
+
+        const q = sdkQuery({ prompt: buildPrompt(prompt, contentBlocks), options });
         let sentRole = false;
         let actualModel = model;
 

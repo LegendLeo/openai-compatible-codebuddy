@@ -2,9 +2,29 @@
 
 // ============ Request Types ============
 
+/**
+ * OpenAI multimodal content part types.
+ * See: https://platform.openai.com/docs/api-reference/chat/create#chat-create-messages
+ */
+export interface TextContentPart {
+  type: 'text';
+  text: string;
+}
+
+export interface ImageUrlContentPart {
+  type: 'image_url';
+  image_url: {
+    url: string;       // data:image/...;base64,xxx  or  https://...
+    detail?: 'auto' | 'low' | 'high';
+  };
+}
+
+export type ContentPart = TextContentPart | ImageUrlContentPart;
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  /** Can be a plain string or an array of content parts (multimodal). */
+  content: string | ContentPart[];
 }
 
 export interface ChatCompletionRequest {
