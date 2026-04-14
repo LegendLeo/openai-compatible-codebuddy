@@ -35,7 +35,11 @@ function buildOptions(model: string, systemPrompt?: string): Options {
     model,
     fallbackModel: config.fallbackModel,
     permissionMode: 'bypassPermissions',
-    maxTurns: 1,
+    // Allow multiple internal turns — some models (e.g. Gemini) may need
+    // internal tool-use rounds (thinking, retrieval) before producing
+    // the final text response. 1 is too restrictive and causes
+    // "Max turns (N) exceeded" errors.
+    maxTurns: 5,
     env: buildEnv(),
     // Always set systemPrompt to override the SDK's built-in CodeBuddy prompt.
     // When the caller provides one, use it; otherwise fall back to a neutral prompt.
@@ -143,6 +147,12 @@ export function chatCompletionStream(
         let sentRole = false;
         let actualModel = model;
 
+        // Buffer the final stop signal — we must send it AFTER all content
+        // chunks. The SDK may emit `message_delta` (stop_reason) before
+        // the `result` event that carries the full text in non-streaming
+        // fallback scenarios.
+        let pendingStopUsage: { input_tokens: number; output_tokens: number } | null = null;
+
         for await (const message of q) {
           if (message.type === 'stream_event') {
             const event = message.event;
@@ -167,28 +177,39 @@ export function chatCompletionStream(
             } else if (event.type === 'message_start') {
               actualModel = event.message.model;
             } else if (event.type === 'message_delta') {
-              // Send final chunk with finish_reason and usage
-              const finishReason = event.delta.stop_reason === 'end_turn' ? 'stop' as const : 'stop' as const;
-              const usage = event.usage ? {
+              // Don't send stop immediately — buffer it.
+              // It will be sent after all content is done.
+              pendingStopUsage = event.usage ? {
                 input_tokens: event.usage.input_tokens,
                 output_tokens: event.usage.output_tokens,
               } : null;
-              const chunk = formatChatCompletionChunk(
-                null, actualModel, finishReason, usage
-              );
-              controller.enqueue(encoder.encode(formatSSEMessage(chunk)));
             }
           } else if (message.type === 'result') {
-            // If no stream events were sent, send the result text as a single chunk
-            if (!sentRole && message.type === 'result' && 'result' in message) {
+            // If no stream events produced text, send the full result as a single chunk
+            if (!sentRole && 'result' in message) {
               const resultMsg = message as { result: string; usage: typeof lastUsage; [key: string]: unknown };
               const chunk = formatChatCompletionChunk(
-                resultMsg.result, actualModel, 'stop', resultMsg.usage, true
+                resultMsg.result, actualModel, null, null, true
               );
               controller.enqueue(encoder.encode(formatSSEMessage(chunk)));
+              sentRole = true;
+
+              // Use result usage if we don't have one from message_delta
+              if (!pendingStopUsage && resultMsg.usage) {
+                pendingStopUsage = {
+                  input_tokens: resultMsg.usage.input_tokens,
+                  output_tokens: resultMsg.usage.output_tokens,
+                };
+              }
             }
           }
         }
+
+        // Now send the final stop chunk
+        const stopChunk = formatChatCompletionChunk(
+          null, actualModel, 'stop', pendingStopUsage
+        );
+        controller.enqueue(encoder.encode(formatSSEMessage(stopChunk)));
 
         controller.enqueue(encoder.encode(formatSSEDone()));
         controller.close();
