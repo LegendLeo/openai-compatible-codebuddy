@@ -35,11 +35,13 @@ function buildOptions(model: string, systemPrompt?: string): Options {
     model,
     fallbackModel: config.fallbackModel,
     permissionMode: 'bypassPermissions',
-    // Allow multiple internal turns — some models (e.g. Gemini) may need
-    // internal tool-use rounds (thinking, retrieval) before producing
-    // the final text response. 1 is too restrictive and causes
-    // "Max turns (N) exceeded" errors.
-    maxTurns: 5,
+    // Pure chat mode: disable ALL built-in tools so the Agent only produces
+    // text responses. Without this, the SDK Agent has access to Bash, Read,
+    // Write, Edit, Grep, Glob, WebSearch, etc. and will try to call them,
+    // consuming extra turns and causing long delays or "Max turns exceeded".
+    allowedTools: [],
+    // With no tools available, 1 turn is sufficient: user message → text reply.
+    maxTurns: 1,
     env: buildEnv(),
     // Always set systemPrompt to override the SDK's built-in CodeBuddy prompt.
     // When the caller provides one, use it; otherwise fall back to a neutral prompt.
